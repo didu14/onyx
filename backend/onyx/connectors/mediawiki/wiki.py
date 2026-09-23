@@ -57,7 +57,8 @@ def get_doc_from_page(
         Generated document.
     """
     page_text = page.text
-    sections_extracted: textlib.Content = textlib.extract_sections(page_text, site)
+    sections_extracted: textlib.Content = textlib.extract_sections(
+        page_text, site)
 
     sections = [
         TextSection(
@@ -81,7 +82,8 @@ def get_doc_from_page(
         ),
         sections=cast(list[TextSection | ImageSection], sections),
         semantic_identifier=page.title(),
-        metadata={"categories": [category.title() for category in page.categories()]},
+        metadata={"categories": [category.title()
+                                 for category in page.categories()]},
         id=f"MEDIAWIKI_{page.pageid}_{page.full_url()}",
     )
 
@@ -174,26 +176,40 @@ class MediaWikiConnector(LoadConnector, PollConnector):
         doc_batch: list[Document | HierarchyNode] = []
 
         # Pywikibot can handle batching for us, including only loading page contents when we finally request them.
-        category_pages = [
-            pagegenerators.PreloadingGenerator(
-                pagegenerators.EdittimeFilterPageGenerator(  # ty: ignore[invalid-argument-type]
-                    pagegenerators.CategorizedPageGenerator(
-                        category, recurse=self.recurse_depth
-                    ),
-                    last_edit_start=(
-                        datetime.datetime.fromtimestamp(start) if start else None
-                    ),
-                    last_edit_end=datetime.datetime.fromtimestamp(end) if end else None,
-                ),
-                groupsize=self.batch_size,
-            )
-            for category in self.categories
-        ]
-
         # Since we can specify both individual pages and categories, we need to iterate over all of them.
-        all_pages: Iterator[pywikibot.Page] = itertools.chain(
-            self.pages, *category_pages
-        )
+        if not self.categories and not self.pages:
+            all_pages: Iterator[pywikibot.Page] = (
+                pagegenerators.PreloadingGenerator(
+                    pagegenerators.AllpagesPageGenerator(
+                        site=self.site,
+                        namespace=0,
+                    ),
+                    groupsize=self.batch_size
+                )
+            )
+        else:
+            category_pages = [
+                pagegenerators.PreloadingGenerator(
+                    pagegenerators.EdittimeFilterPageGenerator(  # ty: ignore[invalid-argument-type]
+                        pagegenerators.CategorizedPageGenerator(
+                            category, recurse=self.recurse_depth
+                        ),
+                        last_edit_start=(
+                            datetime.datetime.fromtimestamp(
+                                start) if start else None
+                        ),
+                        last_edit_end=datetime.datetime.fromtimestamp(
+                            end) if end else None,
+                    ),
+                    groupsize=self.batch_size,
+                )
+                for category in self.categories
+            ]
+
+            all_pages = itertools.chain(
+                self.pages, *category_pages
+            )
+
         for page in all_pages:
             logger.info(
                 "MediaWikiConnector: title='%s' url=%s", page.title(), page.full_url()
